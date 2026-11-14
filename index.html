@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="nl-BE">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Transformaties van tweedegraadsfuncties</title>
+<style>
+  :root{--bg:#f6f7fb;--card:#fff;--ink:#1d2433;--muted:#6b7385;--line:#e3e6ee}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+  header{padding:16px 22px 4px}
+  h1{margin:0;font-size:1.4rem}
+  header p{margin:4px 0 0;color:var(--muted)}
+  .wrap{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:18px;padding:12px 22px 24px;align-items:start}
+  @media (max-width:980px){.wrap{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+  #plotCard{padding:10px;position:sticky;top:10px}
+  @media (max-width:980px){#plotCard{position:relative;top:0}}
+  canvas{width:100%;height:auto;display:block;border-radius:10px;touch-action:none;cursor:crosshair}
+  canvas.drag{cursor:grabbing}
+  .zoom{position:absolute;right:20px;top:20px;display:flex;gap:6px}
+  .zoom button{width:36px;height:36px;font-size:1.1rem;padding:0}
+  #coord{position:absolute;left:20px;top:20px;background:rgba(255,255,255,.94);border:1px solid var(--line);border-radius:8px;padding:4px 8px;font-size:.9rem;display:none;line-height:1.45}
+  .plothint{font-size:.8rem;color:var(--muted);margin:6px 4px 0}
+  button{font:inherit;border:1px solid var(--line);background:#fff;border-radius:8px;padding:5px 10px;cursor:pointer}
+  button:hover{background:#f0f2f8}
+  .fn{border-left:5px solid var(--c);padding:10px 12px 8px;margin-bottom:12px}
+  .fnhead{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+  .fnhead label{display:flex;align-items:center;gap:6px;font-weight:600;color:var(--c)}
+  .seg{display:inline-flex;border-radius:9px;overflow:hidden;background:#111;gap:2px;padding:2px}
+  .seg button{border:0;border-radius:7px;padding:6px 12px;font-size:.9rem;background:#111;color:#fff;font-weight:600}
+  .seg button:hover{background:#333}
+  .seg button.on{background:var(--c);color:#fff}
+  .formula{font-family:"Cambria Math","Times New Roman",serif;font-size:1.45rem;font-weight:600;color:var(--c);margin:8px 0 2px;min-height:1.6em}
+  .other{font-family:"Cambria Math","Times New Roman",serif;font-size:1.05rem;color:var(--muted);min-height:1.3em}
+  .row{display:grid;grid-template-columns:22px 1fr 78px;align-items:center;gap:8px;margin:5px 0}
+  .row b{font-family:"Times New Roman",serif;font-style:italic;font-size:1.15rem;text-align:center}
+  input[type=range]{width:100%;accent-color:var(--c)}
+  input[type=number]{width:78px;padding:5px 6px;font-size:.95rem;border:1px solid var(--line);border-radius:7px}
+  .err{color:#c0262d;font-size:.82rem;min-height:1.1em}
+  .fn.off .body{display:none}
+  .chk{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:.93rem}
+</style>
+</head>
+<body>
+<header>
+  <h1>Transformaties van tweedegraadsfuncties</h1>
+  <p>Verander a, h en k (topvorm) of a, b en c (algemene vorm) en kijk wat er met de grafiek gebeurt.</p>
+</header>
+
+<div class="wrap">
+  <div class="card" id="plotCard">
+    <canvas id="cv" width="900" height="700"></canvas>
+    <div id="coord"></div>
+    <div class="zoom">
+      <button id="zin" title="Inzoomen">+</button>
+      <button id="zout" title="Uitzoomen">−</button>
+      <button id="zreset" title="Standaardzicht">⟲</button>
+    </div>
+    <p class="plothint">Sleep het rooster om te verschuiven. Beweeg over het rooster om coördinaten af te lezen.</p>
+  </div>
+
+  <div>
+    <div id="fns"></div>
+    <div class="card">
+      <label class="chk"><input type="checkbox" id="showOther"> toon onder elk voorschrift ook de andere vorm</label>
+      <label class="chk"><input type="checkbox" id="showRef" checked> toon y = x² als referentie (grijs, streepjeslijn)</label>
+      <label class="chk"><input type="checkbox" id="showRef2"> toon y = −x² als referentie (grijs, puntjeslijn)</label>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+  const W=cv.width, H=cv.height;
+  const C={ref:'#9aa3b5',grid:'#eceff5',axis:'#1d2433',lab:'#6b7385'};
+  const ZOOMS=[3,4,6,8,10,15,20,30,50];
+  let zi=3, cx=0, cy=0, hoverPx=null, ready=false;
+  const $=id=>document.getElementById(id);
+  const EPS=1e-9;
+
+  const F=[
+    {id:'f1',name:'f₁',color:'#2563eb',on:true, form:'top',a:1, h:2, k:-1},
+    {id:'f2',name:'f₂',color:'#e0632a',on:true, form:'top',a:-1,h:-1,k:3},
+    {id:'f3',name:'f₃',color:'#16a34a',on:true, form:'alg',a:1, b:-6,c:5}
+  ];
+  F.forEach(f=>{ if(f.form==='top'){toAlg(f);} else {toTop(f);} });
+
+  function toAlg(f){ f.b=-2*f.a*f.h; f.c=f.a*f.h*f.h+f.k; }
+  function toTop(f){ if(Math.abs(f.a)<EPS){f.h=NaN;f.k=NaN;return;} f.h=-f.b/(2*f.a); f.k=f.c-f.b*f.b/(4*f.a); }
+  function val(f,x){ return f.form==='top' ? f.a*(x-f.h)*(x-f.h)+f.k : f.a*x*x+f.b*x+f.c; }
+
+  function r3(v){ return Math.round(v*1000)/1000; }
+  function fmt(v){ v=r3(v); if(Math.abs(v)<EPS) v=0; return String(v).replace('.',',').replace('-','−'); }
+  function coef(a){ if(Math.abs(a-1)<EPS) return ''; if(Math.abs(a+1)<EPS) return '−'; return fmt(a); }
+  function signed(v){ return v>0 ? ' + '+fmt(v) : ' − '+fmt(-v); }
+
+  function topStr(a,h,k){
+    if(Math.abs(a)<EPS) return fmt(k);
+    let s;
+    if(Math.abs(h)<EPS) s=coef(a)+'x²';
+    else s=coef(a)+'(x '+(h>0?'− '+fmt(h):'+ '+fmt(-h))+')²';
+    if(Math.abs(k)>EPS) s+=signed(k);
+    return s;
+  }
+  function algStr(a,b,c){
+    let s='';
+    if(Math.abs(a)>EPS) s=coef(a)+'x²';
+    if(Math.abs(b)>EPS){
+      const m=Math.abs(Math.abs(b)-1)<EPS?'':fmt(Math.abs(b));
+      s+= s ? (b>0?' + ':' − ')+m+'x' : (b<0?'−':'')+m+'x';
+    }
+    if(Math.abs(c)>EPS || !s) s+= s ? signed(c) : fmt(c);
+    return s;
+  }
+
+  // ---------- panelen opbouwen ----------
+  const RANGES={a:[-5,5],h:[-10,10],k:[-10,10],b:[-20,20],c:[-20,20]};
+  function rowHTML(f,p){
+    return '<div class="row"><b>'+p+'</b><input type="range" id="'+f.id+'_'+p+'R" min="'+RANGES[p][0]+'" max="'+RANGES[p][1]+'" step="0.1">'+
+           '<input type="number" id="'+f.id+'_'+p+'N" step="0.1"></div>';
+  }
+  const box=$('fns');
+  F.forEach(f=>{
+    const d=document.createElement('div');
+    d.className='card fn'; d.id=f.id+'_card'; d.style.setProperty('--c',f.color);
+    d.innerHTML=
+      '<div class="fnhead"><label><input type="checkbox" id="'+f.id+'_on" checked> '+f.name+'</label>'+
+      '<div class="seg"><button id="'+f.id+'_btop">topvorm</button><button id="'+f.id+'_balg">algemene vorm</button></div></div>'+
+      '<div class="body"><div class="formula" id="'+f.id+'_txt"></div><div class="other" id="'+f.id+'_oth"></div>'+
+      '<div id="'+f.id+'_rows"></div><div class="err" id="'+f.id+'_err"></div></div>';
+    box.appendChild(d);
+    $(f.id+'_on').addEventListener('change',e=>{f.on=e.target.checked; d.classList.toggle('off',!f.on); draw();});
+    $(f.id+'_btop').addEventListener('click',()=>switchForm(f,'top'));
+    $(f.id+'_balg').addEventListener('click',()=>switchForm(f,'alg'));
+    buildRows(f);
+  });
+
+  function params(f){ return f.form==='top'?['a','h','k']:['a','b','c']; }
+
+  function buildRows(f){
+    $(f.id+'_rows').innerHTML=params(f).map(p=>rowHTML(f,p)).join('');
+    $(f.id+'_btop').classList.toggle('on',f.form==='top');
+    $(f.id+'_balg').classList.toggle('on',f.form==='alg');
+    params(f).forEach(p=>{
+      const R=$(f.id+'_'+p+'R'), N=$(f.id+'_'+p+'N');
+      R.value=f[p]; N.value=r3(f[p]);
+      R.addEventListener('input',()=>{ f[p]=parseFloat(R.value); N.value=r3(f[p]); changed(f); });
+      N.addEventListener('input',()=>{
+        const v=parseFloat(String(N.value).replace(',','.'));
+        if(isNaN(v)){ $(f.id+'_err').textContent='Typ een getal, bv. 2 of -0.5'; return; }
+        f[p]=v; R.value=Math.max(RANGES[p][0],Math.min(RANGES[p][1],v));
+        changed(f, (v<RANGES[p][0]||v>RANGES[p][1]) ? 'Let op: de schuifbalk van '+p+' gaat maar van '+fmt(RANGES[p][0])+' tot '+fmt(RANGES[p][1])+'.' : '');
+      });
+    });
+    changed(f);
+  }
+
+  function switchForm(f,form){
+    if(f.form===form) return;
+    if(form==='top' && Math.abs(f.a)<EPS){
+      $(f.id+'_err').textContent='Met a = 0 is dit geen tweedegraadsfunctie: er is geen topvorm.';
+      return;
+    }
+    if(form==='top') toTop(f); else toAlg(f);
+    f.form=form; buildRows(f);
+  }
+
+  function changed(f,msg){
+    if(f.form==='top') toAlg(f); else toTop(f);
+    const zero=Math.abs(f.a)<EPS;
+    $(f.id+'_err').textContent = msg || (zero?'a = 0: dit is geen tweedegraadsfunctie meer (geen parabool).':'');
+    const main = f.form==='top' ? topStr(f.a,f.h,f.k) : algStr(f.a,f.b,f.c);
+    $(f.id+'_txt').textContent=f.name.replace('₁','₁')+'(x) = '+main;
+    let oth='';
+    if($('showOther').checked){
+      if(f.form==='top') oth='= '+algStr(f.a,f.b,f.c);
+      else oth= zero ? '' : '= '+topStr(f.a,f.h,f.k);
+    }
+    $(f.id+'_oth').textContent=oth;
+    draw();
+  }
+
+  // ---------- tekenen ----------
+  function view(){ const z=ZOOMS[zi], zy=z*H/W; return {xmin:cx-z,xmax:cx+z,ymin:cy-zy,ymax:cy+zy}; }
+  const sx=(x,v)=>(x-v.xmin)/(v.xmax-v.xmin)*W;
+  const sy=(y,v)=>H-(y-v.ymin)/(v.ymax-v.ymin)*H;
+  const wx=(px,v)=>v.xmin+px/W*(v.xmax-v.xmin);
+  const wy=(py,v)=>v.ymin+(H-py)/H*(v.ymax-v.ymin);
+  function niceStep(r){ const raw=r/10,p=Math.pow(10,Math.floor(Math.log10(raw))),m=raw/p; return (m<1.5?1:m<3.5?2:m<7.5?5:10)*p; }
+
+  function drawGrid(v){
+    ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);
+    const st=niceStep(v.xmax-v.xmin);
+    ctx.lineWidth=1;ctx.strokeStyle=C.grid;
+    for(let x=Math.ceil(v.xmin/st)*st;x<=v.xmax;x+=st){ctx.beginPath();ctx.moveTo(sx(x,v),0);ctx.lineTo(sx(x,v),H);ctx.stroke();}
+    for(let y=Math.ceil(v.ymin/st)*st;y<=v.ymax;y+=st){ctx.beginPath();ctx.moveTo(0,sy(y,v));ctx.lineTo(W,sy(y,v));ctx.stroke();}
+    const ox=Math.max(1,Math.min(W-1,sx(0,v))), oy=Math.max(1,Math.min(H-1,sy(0,v)));
+    ctx.strokeStyle=C.axis;ctx.lineWidth=1.6;
+    ctx.beginPath();ctx.moveTo(0,oy);ctx.lineTo(W,oy);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(ox,H);ctx.lineTo(ox,0);ctx.stroke();
+    ctx.fillStyle=C.axis;
+    ctx.beginPath();ctx.moveTo(W,oy);ctx.lineTo(W-12,oy-6);ctx.lineTo(W-12,oy+6);ctx.fill();
+    ctx.beginPath();ctx.moveTo(ox,0);ctx.lineTo(ox-6,12);ctx.lineTo(ox+6,12);ctx.fill();
+    ctx.font='italic 18px "Times New Roman",serif';
+    ctx.fillText('x',W-18,oy-12); ctx.fillText('y',ox+10,18);
+    ctx.font='14px system-ui,sans-serif';ctx.fillStyle=C.lab;
+    const ly=Math.min(oy+5,H-20), lx=Math.max(ox-6,30);
+    ctx.textAlign='center';ctx.textBaseline='top';
+    for(let x=Math.ceil((v.xmin+st/2)/st)*st;x<=v.xmax-st/2;x+=st){ if(Math.abs(x)<EPS) continue; ctx.fillText(fmt(x),sx(x,v),ly); }
+    ctx.textAlign='right';ctx.textBaseline='middle';
+    for(let y=Math.ceil((v.ymin+st/2)/st)*st;y<=v.ymax-st/2;y+=st){ if(Math.abs(y)<EPS) continue; ctx.fillText(fmt(y),lx,sy(y,v)); }
+    if(sx(0,v)>0&&sx(0,v)<W&&sy(0,v)>0&&sy(0,v)<H){ctx.textBaseline='top';ctx.fillText('0',ox-5,oy+5);}
+  }
+
+  function plot(fn,color,v,dash,width){
+    ctx.save();ctx.strokeStyle=color;ctx.lineWidth=width;ctx.setLineDash(dash||[]);
+    ctx.beginPath();let started=false;
+    for(let px=0;px<=W;px++){
+      const py=sy(fn(wx(px,v)),v);
+      if(py<-3000||py>H+3000){started=false;continue;}
+      if(!started){ctx.moveTo(px,py);started=true;} else ctx.lineTo(px,py);
+    }
+    ctx.stroke();ctx.restore();
+  }
+  function dot(x,y,color,v,r){ ctx.fillStyle=color;ctx.beginPath();ctx.arc(sx(x,v),sy(y,v),r||5,0,2*Math.PI);ctx.fill(); }
+
+  function draw(){
+    if(!ready) return;
+    const v=view();
+    drawGrid(v);
+    if($('showRef').checked) plot(x=>x*x,C.ref,v,[10,6],2);
+    if($('showRef2').checked) plot(x=>-x*x,C.ref,v,[2,5],2.5);
+    const act=F.filter(f=>f.on);
+    for(let i=act.length-1;i>=0;i--) plot(x=>val(act[i],x),act[i].color,v,[],3.5);
+    // toppen
+    ctx.font='bold 14px system-ui,sans-serif';
+    act.forEach(f=>{
+      if(Math.abs(f.a)<EPS||isNaN(f.h)) return;
+      dot(f.h,f.k,f.color,v,6);
+      const t='T('+fmt(f.h)+' ; '+fmt(f.k)+')';
+      const px=sx(f.h,v)+9, py=sy(f.k,v)+(f.a>0?18:-8);
+      ctx.textAlign='left';ctx.textBaseline='middle';
+      ctx.lineWidth=4;ctx.strokeStyle='rgba(255,255,255,.9)';ctx.strokeText(t,px,py);
+      ctx.fillStyle=f.color;ctx.fillText(t,px,py);
+    });
+    const c=$('coord');
+    if(hoverPx!==null && act.length){
+      const x=Math.round(wx(hoverPx,v)*10)/10;
+      ctx.save();ctx.setLineDash([4,4]);ctx.lineWidth=1;
+      const lines=[];
+      act.forEach(f=>{
+        const y=val(f,x);
+        ctx.strokeStyle=f.color;ctx.beginPath();ctx.moveTo(sx(x,v),sy(0,v));ctx.lineTo(sx(x,v),sy(y,v));ctx.stroke();
+        lines.push('<span style="color:'+f.color+'">'+f.name+': ('+fmt(x)+' ; '+fmt(y)+')</span>');
+      });
+      ctx.restore();
+      act.forEach(f=>dot(x,val(f,x),f.color,v,5));
+      c.innerHTML=lines.join('<br>'); c.style.display='block';
+    } else c.style.display='none';
+  }
+
+  // ---------- interactie ----------
+  $('zin').onclick=()=>{if(zi>0){zi--;draw();}};
+  $('zout').onclick=()=>{if(zi<ZOOMS.length-1){zi++;draw();}};
+  $('zreset').onclick=()=>{zi=3;cx=0;cy=0;draw();};
+  ['showRef','showRef2'].forEach(id=>$(id).addEventListener('change',draw));
+  $('showOther').addEventListener('change',()=>F.forEach(f=>changed(f)));
+
+  let drag=null;
+  function toPx(e){ const r=cv.getBoundingClientRect(); return {x:(e.clientX-r.left)/r.width*W, y:(e.clientY-r.top)/r.height*H}; }
+  cv.addEventListener('pointerdown',e=>{
+    const p=toPx(e); drag={x:p.x,y:p.y,cx,cy,moved:false};
+    cv.setPointerCapture(e.pointerId); hoverPx=p.x; draw();
+  });
+  cv.addEventListener('pointermove',e=>{
+    const p=toPx(e);
+    if(drag){
+      const v=view(), dx=p.x-drag.x, dy=p.y-drag.y;
+      if(Math.abs(dx)+Math.abs(dy)>4) drag.moved=true;
+      if(drag.moved){
+        cv.classList.add('drag');
+        cx=drag.cx-dx/W*(v.xmax-v.xmin); cy=drag.cy+dy/H*(v.ymax-v.ymin);
+        hoverPx=null; draw(); return;
+      }
+    }
+    hoverPx=p.x; draw();
+  });
+  function endDrag(){ drag=null; cv.classList.remove('drag'); }
+  cv.addEventListener('pointerup',endDrag);
+  cv.addEventListener('pointercancel',endDrag);
+  cv.addEventListener('pointerleave',()=>{ if(!drag){hoverPx=null;draw();} });
+
+  ready=true; draw();
+})();
+</script>
+</body>
+</html>
